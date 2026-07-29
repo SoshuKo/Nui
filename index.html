@@ -100,13 +100,22 @@
     function addToy(id,index=0){
       if(toys.length>=10){ note('広場は10人まで。ひとり戻してから呼んでね。'); return; } if(toys.some(t=>t.id===id))return;
       const rect=stage.getBoundingClientRect(), char=data.characters[id], size=window.innerWidth<681?104:130;
-      const toy={ id, char, x:rect.width*(.16+(index%5)*.17), y:Math.max(90,rect.height*(.18+Math.floor(index/5)*.2)), vx:(Math.random()-.5)*70, vy:0, r:size*.32, size, mass:.7+Math.random()*.7, angle:(Math.random()-.5)*.15, va:0, squish:0, held:false, bubble:null };
-      const el=document.createElement('div'); el.className='plush'; el.setAttribute('role','button'); el.setAttribute('aria-label',`${char.display_name}のぬいぐるみ`); el.innerHTML=`<div class="shadow"></div><div class="toy"><img draggable="false" src="assets/${encodeURIComponent(char.display_name)}.png" alt="${char.display_name}のぬいぐるみ"></div><span class="name">${char.display_name}</span>`; toy.el=el; el.addEventListener('pointerdown',e=>onToyDown(e,toy)); stage.append(el); toys.push(toy); updateMembers();
+      const toy={ id, char, x:rect.width*(.16+(index%5)*.17), y:Math.max(90,rect.height*(.18+Math.floor(index/5)*.2)), vx:(Math.random()-.5)*70, vy:0, r:size*.32, size, mass:.7+Math.random()*.7, angle:(Math.random()-.5)*.15, va:0, squish:0, held:false, bubble:null, hitMask:null };
+      const el=document.createElement('div'); el.className='plush'; el.setAttribute('role','button'); el.setAttribute('aria-label',`${char.display_name}のぬいぐるみ`); el.innerHTML=`<div class="shadow"></div><div class="toy"><img draggable="false" src="assets/${encodeURIComponent(char.display_name)}.png" alt="${char.display_name}のぬいぐるみ"></div><span class="name">${char.display_name}</span>`; toy.el=el; const image=el.querySelector('img'); image.addEventListener('load',()=>prepareHitMask(toy,image),{once:true}); if(image.complete)prepareHitMask(toy,image); el.addEventListener('pointerdown',e=>onToyDown(e,toy)); stage.append(el); toys.push(toy); updateMembers();
     }
     function removeToy(toy){ if(toy.bubble)toy.bubble.remove(); toy.el.remove(); toys=toys.filter(t=>t!==toy); updateMembers(); }
     document.querySelector('#shuffle').addEventListener('click',()=>{ if(drag){note('ドラッグを終えてから、メンバー交代しよう。');return;} toys.slice().forEach(removeToy); const ids=[...data.character_order].sort(()=>Math.random()-.5).slice(0,6); ids.forEach((id,i)=>addToy(id,i)); note('新しいぬいぐるみたちがやってきました。'); });
 
-    function onToyDown(event,toy){ event.preventDefault(); event.stopPropagation(); select(toy); const q=point(event); drag={toy,pointerId:event.pointerId,ox:q.x-toy.x,oy:q.y-toy.y,startX:q.x,startY:q.y,time:performance.now(),moved:false}; stage.setPointerCapture?.(event.pointerId); }
+    function prepareHitMask(toy,image){
+      try { const canvas=document.createElement('canvas'), size=256, context=canvas.getContext('2d',{willReadFrequently:true}); canvas.width=size;canvas.height=size; const ratio=Math.min(size/image.naturalWidth,size/image.naturalHeight), width=image.naturalWidth*ratio,height=image.naturalHeight*ratio;context.drawImage(image,(size-width)/2,(size-height)/2,width,height);toy.hitMask={pixels:context.getImageData(0,0,size,size).data,size}; } catch { toy.hitMask=null; }
+    }
+    function isVisiblePixel(toy,event){
+      if(!toy.hitMask)return true; const q=point(event),width=toy.el.offsetWidth,height=toy.el.offsetHeight,baseX=toy.x-toy.size/2,baseY=toy.y-toy.size*.76,originX=width/2,originY=height;
+      let x=q.x-baseX-originX,y=q.y-baseY-originY,cos=Math.cos(-toy.angle),sin=Math.sin(-toy.angle),rotX=x*cos-y*sin+originX,rotY=x*sin+y*cos+originY;
+      const sx=1+toy.squish*.62,sy=1-toy.squish*.42; x=originX+(rotX-originX)/sx;y=originY+(rotY-originY)/sy; const size=toy.hitMask.size,px=Math.floor(x/width*size),py=Math.floor(y/(height-12)*size);
+      if(px<0||py<0||px>=size||py>=size)return false; return toy.hitMask.pixels[(py*size+px)*4+3]>30;
+    }
+    function onToyDown(event,toy){ if(!isVisiblePixel(toy,event))return; event.preventDefault(); event.stopPropagation(); select(toy); const q=point(event); drag={toy,pointerId:event.pointerId,ox:q.x-toy.x,oy:q.y-toy.y,startX:q.x,startY:q.y,time:performance.now(),moved:false}; stage.setPointerCapture?.(event.pointerId); }
     stage.addEventListener('pointermove',event=>{ if(!drag||drag.pointerId!==event.pointerId)return; const q=point(event), toy=drag.toy; if(!drag.moved&&Math.hypot(q.x-drag.startX,q.y-drag.startY)>6){drag.moved=true;toy.held=true;toy.el.classList.add('held');react(toy,'picked_up');} if(drag.moved){toy.targetX=q.x-drag.ox;toy.targetY=q.y-drag.oy;const now=performance.now(),dt=Math.max(.016,(now-drag.time)/1000);toy.vx=(toy.targetX-toy.x)/dt*.14;toy.vy=(toy.targetY-toy.y)/dt*.14;drag.time=now;} });
     stage.addEventListener('pointerup',finishDrag); stage.addEventListener('pointercancel',finishDrag);
     function finishDrag(event){ if(!drag||drag.pointerId!==event.pointerId)return; const current=drag,toy=current.toy; drag=null; if(current.moved){toy.targetX=null;toy.targetY=null;toy.held=false;toy.el.classList.remove('held');toy.squish=Math.max(toy.squish,.24);react(toy,'dropped');}else react(toy,'touched'); }
